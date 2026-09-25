@@ -78,6 +78,8 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(900, updated["check_interval_seconds"])
             self.assertTrue(updated["transfer"]["enabled"])
             self.assertEqual(120, updated["transfer"]["check_interval_seconds"])
+            self.assertIsNone(updated["transfer"]["max_files_per_check"])
+            self.assertEqual(10_000, updated["transfer"]["max_untransferred_files"])
             self.assertEqual(str(destination), updated["transfer"]["destination_folder"])
 
 

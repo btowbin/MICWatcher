@@ -151,7 +151,11 @@ def configure() -> bool:
     if destination is not None:
         transfer["destination_folder"] = str(destination)
     transfer.setdefault("stable_for_seconds", 60)
-    transfer.setdefault("max_files_per_check", 10)
+    if transfer.get("max_files_per_check") == 10:
+        transfer["max_files_per_check"] = None
+    else:
+        transfer.setdefault("max_files_per_check", None)
+    transfer.setdefault("max_untransferred_files", 10_000)
     save_config(config)
 
     if watch_folder != original_watch_folder:

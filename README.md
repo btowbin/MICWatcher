@@ -35,7 +35,8 @@ Configure:
 - `transfer.destination_folder`: the mounted network-drive destination for this microscope.
 - `transfer.check_interval_seconds`: how often transfer candidates are checked, independently of acquisition alarms.
 - `transfer.stable_for_seconds`: how long a file must remain unchanged before copying.
-- `transfer.max_files_per_check`: a load-control limit on copies per interval.
+- `transfer.max_files_per_check`: optional per-check limit; `null` means no limit.
+- `transfer.max_untransferred_files`: backlog safety limit; the default is 10,000.
 
 Keep the Gmail SMTP settings as supplied in the example. Protect the local configuration containing the app password:
 
@@ -71,7 +72,8 @@ Mount the network drive through Ubuntu first, then enable transfer in `watcher_c
   "destination_folder": "/mnt/network-drive/microscope-1",
   "check_interval_seconds": 300,
   "stable_for_seconds": 60,
-  "max_files_per_check": 10
+  "max_files_per_check": null,
+  "max_untransferred_files": 10000
 }
 ```
 
@@ -79,7 +81,9 @@ Files already present when MICWatcher starts are included, as are files created 
 
 If copying or local deletion fails, the source is retained and one warning email is sent. Repeated failures remain silent. A single recovery email is sent after a later file transfers successfully. The daily report includes transfer status, pending count, total transferred count, last success, and any active error.
 
-Use a destination unique to each microscope. The destination must not be inside the watched folder. Start with a low `max_files_per_check` and increase it only if transfers fall behind.
+Use a destination unique to each microscope. The destination must not be inside the watched folder. By default there is no per-check transfer count limit, so every stable candidate is processed. A numeric `max_files_per_check` can still be configured when deliberate throttling is needed.
+
+If the number of untransferred local files exceeds `max_untransferred_files` (10,000 by default), MICWatcher sends a `[SAFETY STOP]` email, saves its state, retains every local file, and exits. Resolve the network or backlog problem before restarting it.
 
 ## Install the desktop launcher
 
@@ -123,7 +127,7 @@ kill "$(cat ~/microscope-watcher/watcher.pid)"
 
 - `microscope_watcher.log` records activity and email failures.
 - `watcher_state.json` preserves activity, alert, and report state across restarts.
-- Warnings repeat every check interval while no activity is detected.
+- At most two inactivity warnings are sent for one interruption. Further checks remain silent until a recovery email reports that files are appearing again.
 - A separate warning is sent when the acquisition folder cannot be read.
 - Failed email delivery is retried on a later check.
 - The daily report gives file count and free/total disk space.

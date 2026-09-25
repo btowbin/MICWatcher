@@ -80,7 +80,8 @@ class TransferConfig:
     destination_folder: Path | None
     check_interval_seconds: float
     stable_for_seconds: float
-    max_files_per_check: int
+    max_files_per_check: int | None
+    max_untransferred_files: int
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,15 @@ class FolderSnapshot:
 
 class FileStillChanging(Exception):
     """Raised when an acquisition file changes while it is being copied."""
+
+
+class TransferBacklogExceeded(RuntimeError):
+    """Raised after the transfer-backlog safety stop has been reported."""
+
+    def __init__(self, count: int, limit: int):
+        self.count = count
+        self.limit = limit
+        super().__init__(f"transfer backlog {count:,} exceeds safety limit {limit:,}")
 
 
 def _require(mapping: dict[str, Any], key: str, location: str) -> Any:
@@ -132,6 +142,10 @@ def load_config(path: Path) -> Config:
     transfer = raw.get("transfer", {})
     transfer_enabled = bool(transfer.get("enabled", False))
     destination_value = str(transfer.get("destination_folder", "")).strip()
+    batch_limit_value = transfer.get("max_files_per_check")
+    batch_limit = (
+        None if batch_limit_value in {None, 0, ""} else int(batch_limit_value)
+    )
     result = Config(
         microscope_name=str(raw.get("microscope_name", socket.gethostname())),
         watch_folder=config_path(str(_require(raw, "watch_folder", "config"))),
@@ -158,7 +172,8 @@ def load_config(path: Path) -> Config:
                 transfer.get("check_interval_seconds", raw.get("check_interval_seconds", 300))
             ),
             stable_for_seconds=float(transfer.get("stable_for_seconds", 60)),
-            max_files_per_check=int(transfer.get("max_files_per_check", 10)),
+            max_files_per_check=batch_limit,
+            max_untransferred_files=int(transfer.get("max_untransferred_files", 10_000)),
         ),
     )
     if result.check_interval_seconds <= 0:
@@ -173,8 +188,13 @@ def load_config(path: Path) -> Config:
         raise ValueError("transfer.stable_for_seconds cannot be negative")
     if result.transfer.check_interval_seconds <= 0:
         raise ValueError("transfer.check_interval_seconds must be greater than zero")
-    if result.transfer.max_files_per_check <= 0:
+    if (
+        result.transfer.max_files_per_check is not None
+        and result.transfer.max_files_per_check <= 0
+    ):
         raise ValueError("transfer.max_files_per_check must be greater than zero")
+    if result.transfer.max_untransferred_files <= 0:
+        raise ValueError("transfer.max_untransferred_files must be greater than zero")
     if result.transfer.enabled:
         watch = result.watch_folder.resolve()
         destination = result.transfer.destination_folder.resolve()  # type: ignore[union-attr]
@@ -406,10 +426,36 @@ class Watcher:
                 ),
             }
 
+        pending_count = len(pending)
+        self.state["transfer_pending"] = pending
+        self.state["transfer_pending_count"] = pending_count
+        safety_limit = self.config.transfer.max_untransferred_files
+        if pending_count > safety_limit:
+            self.state["transfer_safety_stopped"] = True
+            self.state["transfer_safety_stopped_at"] = observed_at.isoformat()
+            subject = (
+                f"[SAFETY STOP] {self.config.microscope_name}: "
+                "too many untransferred files"
+            )
+            body = (
+                f"MICWatcher stopped for {self.config.microscope_name} because the transfer "
+                f"backlog reached {pending_count:,} files, exceeding the safety limit of "
+                f"{safety_limit:,}.\n\n"
+                f"Local folder: {self.config.watch_folder}\n"
+                f"Transfer destination: {self.config.transfer.destination_folder}\n"
+                f"Stopped at: {format_timestamp(observed_at)}\n\n"
+                "All untransferred files remain in the local folder. Resolve the backlog or "
+                "network-drive problem before restarting MICWatcher."
+            )
+            self._send(subject, body)
+            raise TransferBacklogExceeded(pending_count, safety_limit)
+        self.state.pop("transfer_safety_stopped", None)
+        self.state.pop("transfer_safety_stopped_at", None)
+
         transferred = 0
         limit = self.config.transfer.max_files_per_check
         for relative in sorted(records):
-            if transferred >= limit:
+            if limit is not None and transferred >= limit:
                 break
             entry = pending[relative]
             unchanged_since = parse_timestamp(entry.get("unchanged_since"))
@@ -532,21 +578,31 @@ class Watcher:
                     f"Newest file: {snapshot.newest_file or 'unknown'}\n"
                     f"Current file count: {snapshot.file_count:,}\n"
                 )
-                if self._send(subject, body):
-                    self.state["stalled"] = False
-            elif inactivity_due and not activity:
-                subject = f"[WARNING] {self.config.microscope_name}: no new images"
-                body = (
-                    f"No new or updated image files were detected for {self.config.microscope_name} "
-                    f"during the latest check interval.\n\n"
-                    f"Folder: {self.config.watch_folder}\n"
-                    f"Last activity observed: {format_timestamp(last_activity)}\n"
-                    f"Last active file: {self.state.get('last_activity_file') or 'unknown'}\n"
-                    f"Checked at: {format_timestamp(observed_at)}\n"
-                    f"Current file count: {snapshot.file_count:,}\n\n"
-                    "Another warning will be sent after the next interval if acquisition does not resume."
-                )
                 self._send(subject, body)
+                self.state["stalled"] = False
+                self.state["inactivity_warning_count"] = 0
+            elif inactivity_due and not activity:
+                warning_count = int(self.state.get("inactivity_warning_count", 0))
+                if warning_count < 2:
+                    warning_number = warning_count + 1
+                    subject = f"[WARNING {warning_number}/2] {self.config.microscope_name}: no new images"
+                    body = (
+                        f"No new or updated image files were detected for {self.config.microscope_name} "
+                        f"during the latest check interval.\n\n"
+                        f"Folder: {self.config.watch_folder}\n"
+                        f"Last activity observed: {format_timestamp(last_activity)}\n"
+                        f"Last active file: {self.state.get('last_activity_file') or 'unknown'}\n"
+                        f"Checked at: {format_timestamp(observed_at)}\n"
+                        f"Current file count: {snapshot.file_count:,}\n\n"
+                        + (
+                            "One final warning will be sent after the next interval if acquisition "
+                            "does not resume."
+                            if warning_number == 1
+                            else "No further inactivity warnings will be sent until acquisition resumes."
+                        )
+                    )
+                    self._send(subject, body)
+                    self.state["inactivity_warning_count"] = warning_number
                 self.state["stalled"] = True
 
             self.state["file_count"] = snapshot.file_count
@@ -566,11 +622,15 @@ class Watcher:
             self._send(subject, body)
             self.state["stalled"] = True
 
-        transferred = (
-            self._process_transfers(snapshot, observed_at)
-            if check_transfer and snapshot is not None
-            else 0
-        )
+        try:
+            transferred = (
+                self._process_transfers(snapshot, observed_at)
+                if check_transfer and snapshot is not None
+                else 0
+            )
+        except TransferBacklogExceeded:
+            save_state(self.config.state_file, self.state)
+            raise
         report_snapshot = snapshot
         if snapshot is not None and transferred:
             report_snapshot = FolderSnapshot(
@@ -668,8 +728,12 @@ def main(argv: list[str] | None = None) -> int:
 
     watcher = Watcher(config, mailer)
     if args.once:
-        watcher.check_once()
-        return 0
+        try:
+            watcher.check_once()
+            return 0
+        except TransferBacklogExceeded as exc:
+            LOG.error("MICWatcher safety stop: %s", exc)
+            return 3
 
     LOG.info(
         "Watching %s every %.1f seconds for %s; transfer check every %.1f seconds",
@@ -687,6 +751,9 @@ def main(argv: list[str] | None = None) -> int:
         try:
             if acquisition_due or transfer_due:
                 watcher.check_once(acquisition_due, transfer_due)
+        except TransferBacklogExceeded as exc:
+            LOG.error("MICWatcher safety stop: %s", exc)
+            return 3
         except Exception:
             LOG.exception("Unexpected error during check; watcher will continue")
         current = time.monotonic()

@@ -10,6 +10,7 @@ from microscope_watcher import (
     EmailConfig,
     Mailer,
     TransferConfig,
+    TransferBacklogExceeded,
     Watcher,
     human_bytes,
 )
@@ -43,7 +44,7 @@ class WatcherTests(unittest.TestCase):
             email=EmailConfig(
                 "smtp.test", 587, "starttls", "", "PASSWORD", "", "a@test", ("b@test",), 5
             ),
-            transfer=TransferConfig(False, None, 60, 60, 10),
+            transfer=TransferConfig(False, None, 60, 60, None, 10_000),
         )
 
     def tearDown(self):
@@ -58,7 +59,9 @@ class WatcherTests(unittest.TestCase):
     def enable_transfer(self, destination=None):
         self.config = replace(
             self.config,
-            transfer=TransferConfig(True, destination or self.destination, 60, 60, 10),
+            transfer=TransferConfig(
+                True, destination or self.destination, 60, 60, None, 10_000
+            ),
         )
 
     def test_first_check_establishes_baseline_without_warning(self):
@@ -76,7 +79,11 @@ class WatcherTests(unittest.TestCase):
 
         self.time += timedelta(minutes=1)
         watcher.check_once()
-        self.assertIn("[WARNING]", self.mailer.messages[-1][0])
+        self.assertIn("[WARNING 1/2]", self.mailer.messages[-1][0])
+
+        self.time += timedelta(minutes=1)
+        watcher.check_once()
+        self.assertEqual(2, sum("WARNING" in subject for subject, _ in self.mailer.messages))
 
         self.time += timedelta(minutes=1)
         watcher.check_once()
@@ -86,6 +93,7 @@ class WatcherTests(unittest.TestCase):
         (self.folder / "second.tif").write_bytes(b"image")
         watcher.check_once()
         self.assertIn("[RECOVERED]", self.mailer.messages[-1][0])
+        self.assertEqual(0, watcher.state["inactivity_warning_count"])
 
     def test_does_not_warn_before_a_full_interval(self):
         watcher = self.watcher()
@@ -140,6 +148,39 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(
             b"existing-image", (self.destination / "already-present.tif").read_bytes()
         )
+
+    def test_default_batch_has_no_file_count_limit(self):
+        self.enable_transfer()
+        for index in range(12):
+            (self.folder / f"image-{index:02}.tif").write_bytes(str(index).encode())
+        watcher = self.watcher()
+        watcher.check_once()
+
+        self.time += timedelta(minutes=1)
+        watcher.check_once(False, True)
+        self.assertFalse(any(self.folder.iterdir()))
+        self.assertEqual(12, len(list(self.destination.iterdir())))
+
+    def test_transfer_backlog_safety_stop_preserves_all_files(self):
+        self.config = replace(
+            self.config,
+            transfer=TransferConfig(True, self.destination, 60, 60, None, 2),
+        )
+        for index in range(3):
+            (self.folder / f"backlog-{index}.tif").write_bytes(b"image")
+        watcher = self.watcher()
+
+        with self.assertRaises(TransferBacklogExceeded):
+            watcher.check_once()
+
+        self.assertEqual(3, len(list(self.folder.iterdir())))
+        self.assertFalse(self.destination.exists())
+        self.assertEqual(
+            1, sum("SAFETY STOP" in subject for subject, _ in self.mailer.messages)
+        )
+        state = json.loads(self.config.state_file.read_text(encoding="utf-8"))
+        self.assertTrue(state["transfer_safety_stopped"])
+        self.assertEqual(3, state["transfer_pending_count"])
 
     def test_transfer_only_checks_preserve_acquisition_activity(self):
         self.enable_transfer()
