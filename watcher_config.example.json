@@ -6,6 +6,12 @@
   "daily_report_interval_hours": 24,
   "state_file": "watcher_state.json",
   "log_file": "microscope_watcher.log",
+  "transfer": {
+    "enabled": false,
+    "destination_folder": "/mnt/network-drive/microscope-1",
+    "stable_for_seconds": 60,
+    "max_files_per_check": 10
+  },
   "email": {
     "smtp_host": "smtp.gmail.com",
     "smtp_port": 587,

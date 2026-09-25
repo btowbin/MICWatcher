@@ -31,6 +31,10 @@ Configure:
 - `username` and `from_address`: the watcher Gmail address.
 - `password`: the generated Google app password.
 - `to_addresses`: one or more alert recipients.
+- `transfer.enabled`: set to `true` to move stable new files to network storage.
+- `transfer.destination_folder`: the mounted network-drive destination for this microscope.
+- `transfer.stable_for_seconds`: how long a file must remain unchanged before copying.
+- `transfer.max_files_per_check`: a load-control limit on copies per interval.
 
 Keep the Gmail SMTP settings as supplied in the example. Protect the local configuration containing the app password:
 
@@ -55,6 +59,25 @@ python3 microscope_watcher.py --test-email
 ```
 
 The first real check establishes a baseline and does not send an inactivity warning. It does send the initial daily report. A file counts as activity when the folder's file count increases or the newest file's modification time advances; this also recognizes acquisition formats that continually append to one file.
+
+## Optional network transfer
+
+Mount the network drive through Ubuntu first, then enable transfer in `watcher_config.json`:
+
+```json
+"transfer": {
+  "enabled": true,
+  "destination_folder": "/mnt/network-drive/microscope-1",
+  "stable_for_seconds": 60,
+  "max_files_per_check": 10
+}
+```
+
+Only files first observed after transfer is enabled are moved; existing files establish the initial baseline and remain local. A candidate must be unchanged across checks for at least `stable_for_seconds`. The watcher preserves its path relative to the acquisition folder, copies it to a `.micwatcher-part` file, confirms that the source did not change and that sizes match, finalizes the destination, and only then deletes the local source.
+
+If copying or local deletion fails, the source is retained and one warning email is sent. Repeated failures remain silent. A single recovery email is sent after a later file transfers successfully. The daily report includes transfer status, pending count, total transferred count, last success, and any active error.
+
+Use a destination unique to each microscope. The destination must not be inside the watched folder. Start with a low `max_files_per_check` and increase it only if transfers fall behind.
 
 ## Start and stop manually
 
@@ -89,6 +112,7 @@ kill "$(cat ~/microscope-watcher/watcher.pid)"
 - A separate warning is sent when the acquisition folder cannot be read.
 - Failed email delivery is retried on a later check.
 - The daily report gives file count and free/total disk space.
+- When enabled, network-transfer health and progress are included in the daily report.
 - Temporarily lower `daily_report_interval_hours` to test daily reporting.
 
 ## Update an installed copy

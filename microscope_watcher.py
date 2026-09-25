@@ -70,6 +70,22 @@ class Config:
     state_file: Path
     log_file: Path
     email: EmailConfig
+    transfer: "TransferConfig"
+
+
+@dataclass(frozen=True)
+class TransferConfig:
+    enabled: bool
+    destination_folder: Path | None
+    stable_for_seconds: float
+    max_files_per_check: int
+
+
+@dataclass(frozen=True)
+class FileRecord:
+    path: Path
+    size: int
+    mtime_ns: int
 
 
 @dataclass(frozen=True)
@@ -77,6 +93,11 @@ class FolderSnapshot:
     file_count: int
     newest_mtime_ns: int
     newest_file: str | None
+    transfer_files: tuple[FileRecord, ...] = ()
+
+
+class FileStillChanging(Exception):
+    """Raised when an acquisition file changes while it is being copied."""
 
 
 def _require(mapping: dict[str, Any], key: str, location: str) -> Any:
@@ -106,6 +127,9 @@ def load_config(path: Path) -> Config:
     if not recipients:
         raise ValueError("email.to_addresses must contain at least one address")
 
+    transfer = raw.get("transfer", {})
+    transfer_enabled = bool(transfer.get("enabled", False))
+    destination_value = str(transfer.get("destination_folder", "")).strip()
     result = Config(
         microscope_name=str(raw.get("microscope_name", socket.gethostname())),
         watch_folder=config_path(str(_require(raw, "watch_folder", "config"))),
@@ -125,6 +149,12 @@ def load_config(path: Path) -> Config:
             to_addresses=tuple(str(item) for item in recipients),
             timeout_seconds=float(email.get("timeout_seconds", 30)),
         ),
+        transfer=TransferConfig(
+            enabled=transfer_enabled,
+            destination_folder=config_path(destination_value) if destination_value else None,
+            stable_for_seconds=float(transfer.get("stable_for_seconds", 60)),
+            max_files_per_check=int(transfer.get("max_files_per_check", 10)),
+        ),
     )
     if result.check_interval_seconds <= 0:
         raise ValueError("check_interval_seconds must be greater than zero")
@@ -132,6 +162,17 @@ def load_config(path: Path) -> Config:
         raise ValueError("daily_report_interval_hours must be greater than zero")
     if result.email.security not in {"starttls", "ssl", "none"}:
         raise ValueError("email.security must be one of: starttls, ssl, none")
+    if result.transfer.enabled and result.transfer.destination_folder is None:
+        raise ValueError("transfer.destination_folder is required when transfer is enabled")
+    if result.transfer.stable_for_seconds < 0:
+        raise ValueError("transfer.stable_for_seconds cannot be negative")
+    if result.transfer.max_files_per_check <= 0:
+        raise ValueError("transfer.max_files_per_check must be greater than zero")
+    if result.transfer.enabled:
+        watch = result.watch_folder.resolve()
+        destination = result.transfer.destination_folder.resolve()  # type: ignore[union-attr]
+        if destination == watch or watch in destination.parents:
+            raise ValueError("transfer.destination_folder cannot be inside watch_folder")
     return result
 
 
@@ -147,10 +188,13 @@ def iter_files(folder: Path, recursive: bool) -> Iterable[Path]:
                     yield Path(entry.path)
 
 
-def scan_folder(folder: Path, recursive: bool) -> FolderSnapshot:
+def scan_folder(
+    folder: Path, recursive: bool, collect_after_mtime_ns: int | None = None
+) -> FolderSnapshot:
     count = 0
     newest_ns = 0
     newest_file: str | None = None
+    transfer_files: list[FileRecord] = []
     for path in iter_files(folder, recursive):
         try:
             stat = path.stat()
@@ -158,10 +202,12 @@ def scan_folder(folder: Path, recursive: bool) -> FolderSnapshot:
             LOG.warning("Could not inspect %s: %s", path, exc)
             continue
         count += 1
+        if collect_after_mtime_ns is not None and stat.st_mtime_ns > collect_after_mtime_ns:
+            transfer_files.append(FileRecord(path, stat.st_size, stat.st_mtime_ns))
         if stat.st_mtime_ns > newest_ns:
             newest_ns = stat.st_mtime_ns
             newest_file = str(path)
-    return FolderSnapshot(count, newest_ns, newest_file)
+    return FolderSnapshot(count, newest_ns, newest_file, tuple(transfer_files))
 
 
 def load_state(path: Path) -> dict[str, Any]:
@@ -245,10 +291,177 @@ class Watcher:
             return False
         return snapshot.file_count > int(old_count) or snapshot.newest_mtime_ns > int(old_mtime)
 
+    def _copy_then_delete(self, record: FileRecord) -> Path:
+        destination_root = self.config.transfer.destination_folder
+        if destination_root is None:
+            raise RuntimeError("Transfer destination is not configured")
+        relative = record.path.relative_to(self.config.watch_folder)
+        destination = destination_root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
+        if destination.exists():
+            raise FileExistsError(f"Destination already exists; local source retained: {destination}")
+
+        partial = destination.with_name(destination.name + ".micwatcher-part")
+        try:
+            shutil.copy2(record.path, partial)
+            source_after = record.path.stat()
+            partial_after = partial.stat()
+            if (
+                source_after.st_size != record.size
+                or source_after.st_mtime_ns != record.mtime_ns
+                or partial_after.st_size != record.size
+            ):
+                raise FileStillChanging(str(record.path))
+            if destination.exists():
+                raise FileExistsError(f"Destination appeared during copy: {destination}")
+            os.replace(partial, destination)
+            if destination.stat().st_size != record.size:
+                raise OSError(f"Copied file size verification failed: {destination}")
+            record.path.unlink()
+            return destination
+        except Exception:
+            try:
+                partial.unlink(missing_ok=True)
+            except OSError:
+                LOG.warning("Could not remove partial transfer file %s", partial)
+            raise
+
+    def _record_transfer_failure(
+        self, observed_at: datetime, record: FileRecord, error: Exception
+    ) -> None:
+        first_failure = not bool(self.state.get("transfer_failed", False))
+        self.state["transfer_failed"] = True
+        self.state["last_transfer_error"] = str(error)
+        if first_failure:
+            self.state["transfer_failed_at"] = observed_at.isoformat()
+            subject = f"[TRANSFER WARNING] {self.config.microscope_name}: file transfer failed"
+            body = (
+                f"Automatic file transfer for {self.config.microscope_name} failed.\n\n"
+                f"Source file: {record.path}\n"
+                f"Destination folder: {self.config.transfer.destination_folder}\n"
+                f"Error: {error}\n"
+                f"Failure observed: {format_timestamp(observed_at)}\n\n"
+                "No repeated transfer warnings will be sent while this failure persists. "
+                "A recovery email will be sent after a file transfers successfully."
+            )
+            self._send(subject, body)
+
+    def _process_transfers(self, snapshot: FolderSnapshot, observed_at: datetime) -> int:
+        if not self.config.transfer.enabled:
+            return 0
+
+        if "transfer_cutoff_mtime_ns" not in self.state:
+            self.state["transfer_cutoff_mtime_ns"] = snapshot.newest_mtime_ns
+            self.state["transfer_pending"] = {}
+            LOG.info("Transfer baseline established; existing files will remain local")
+            return 0
+
+        old_pending = self.state.get("transfer_pending", {})
+        if not isinstance(old_pending, dict):
+            old_pending = {}
+        records: dict[str, FileRecord] = {}
+        pending: dict[str, dict[str, Any]] = {}
+        for record in snapshot.transfer_files:
+            relative = str(record.path.relative_to(self.config.watch_folder))
+            records[relative] = record
+            previous = old_pending.get(relative, {})
+            unchanged = (
+                isinstance(previous, dict)
+                and previous.get("size") == record.size
+                and previous.get("mtime_ns") == record.mtime_ns
+            )
+            pending[relative] = {
+                "size": record.size,
+                "mtime_ns": record.mtime_ns,
+                "unchanged_since": (
+                    previous.get("unchanged_since") if unchanged else observed_at.isoformat()
+                ),
+            }
+
+        transferred = 0
+        limit = self.config.transfer.max_files_per_check
+        for relative in sorted(records):
+            if transferred >= limit:
+                break
+            entry = pending[relative]
+            unchanged_since = parse_timestamp(entry.get("unchanged_since"))
+            if unchanged_since is None:
+                entry["unchanged_since"] = observed_at.isoformat()
+                continue
+            stable_seconds = (observed_at - unchanged_since).total_seconds()
+            if stable_seconds < self.config.transfer.stable_for_seconds:
+                continue
+
+            record = records[relative]
+            try:
+                destination = self._copy_then_delete(record)
+            except FileStillChanging:
+                LOG.info("Deferred file that changed during transfer: %s", record.path)
+                entry["unchanged_since"] = observed_at.isoformat()
+                continue
+            except Exception as exc:
+                LOG.error("Transfer failed for %s: %s", record.path, exc)
+                self._record_transfer_failure(observed_at, record, exc)
+                break
+
+            transferred += 1
+            pending.pop(relative, None)
+            self.state["last_transfer_success_at"] = observed_at.isoformat()
+            self.state["last_transferred_file"] = str(destination)
+            self.state["files_transferred_total"] = int(
+                self.state.get("files_transferred_total", 0)
+            ) + 1
+            LOG.info("Transferred %s to %s and removed the local source", record.path, destination)
+
+            if self.state.get("transfer_failed", False):
+                subject = (
+                    f"[TRANSFER RECOVERED] {self.config.microscope_name}: "
+                    "file transfer working again"
+                )
+                body = (
+                    f"Automatic file transfer for {self.config.microscope_name} is working again.\n\n"
+                    f"Transferred to: {destination}\n"
+                    f"Recovery observed: {format_timestamp(observed_at)}\n"
+                )
+                self._send(subject, body)
+                self.state["transfer_failed"] = False
+                self.state.pop("transfer_failed_at", None)
+                self.state.pop("last_transfer_error", None)
+
+        self.state["transfer_pending"] = pending
+        self.state["transfer_pending_count"] = len(pending)
+        return transferred
+
+    def _transfer_report_text(self) -> str:
+        if not self.config.transfer.enabled:
+            return "File transfer: DISABLED"
+        status = "FAILED" if self.state.get("transfer_failed", False) else "OK"
+        lines = [
+            f"File transfer: {status}",
+            f"Transfer destination: {self.config.transfer.destination_folder}",
+            f"Files waiting for stability/transfer: {int(self.state.get('transfer_pending_count', 0)):,}",
+            f"Files transferred since setup: {int(self.state.get('files_transferred_total', 0)):,}",
+            "Last successful transfer: "
+            + format_timestamp(parse_timestamp(self.state.get("last_transfer_success_at"))),
+        ]
+        if self.state.get("transfer_failed", False):
+            lines.append(
+                "Transfer failure since: "
+                + format_timestamp(parse_timestamp(self.state.get("transfer_failed_at")))
+            )
+            lines.append(f"Last transfer error: {self.state.get('last_transfer_error', 'unknown')}")
+        return "\n".join(lines)
+
     def check_once(self) -> None:
         observed_at = self.clock()
+        cutoff = self.state.get("transfer_cutoff_mtime_ns")
         try:
-            snapshot = scan_folder(self.config.watch_folder, self.config.recursive)
+            snapshot = scan_folder(
+                self.config.watch_folder,
+                self.config.recursive,
+                int(cutoff) if self.config.transfer.enabled and cutoff is not None else None,
+            )
         except (FileNotFoundError, PermissionError, OSError) as exc:
             LOG.error("Cannot scan watched folder %s: %s", self.config.watch_folder, exc)
             snapshot = None
@@ -309,7 +522,16 @@ class Watcher:
             self._send(subject, body)
             self.state["stalled"] = True
 
-        self._maybe_send_daily_report(observed_at, snapshot)
+        transferred = self._process_transfers(snapshot, observed_at) if snapshot is not None else 0
+        report_snapshot = snapshot
+        if snapshot is not None and transferred:
+            report_snapshot = FolderSnapshot(
+                max(0, snapshot.file_count - transferred),
+                snapshot.newest_mtime_ns,
+                snapshot.newest_file,
+                snapshot.transfer_files,
+            )
+        self._maybe_send_daily_report(observed_at, report_snapshot)
         self.state["last_check_at"] = observed_at.isoformat()
         save_state(self.config.state_file, self.state)
 
@@ -341,6 +563,7 @@ class Watcher:
             f"Number of files: {count_text}\n"
             f"Last activity observed: {format_timestamp(parse_timestamp(self.state.get('last_activity_at')))}\n"
             f"{disk_text}\n"
+            f"{self._transfer_report_text()}\n"
             f"Report generated: {format_timestamp(observed_at)}\n"
         )
         if self._send(subject, body):
