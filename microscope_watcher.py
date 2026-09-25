@@ -22,6 +22,7 @@ from typing import Any, Callable, Iterable
 LOG = logging.getLogger("microscope_watcher")
 DEFAULT_CONFIG = "watcher_config.json"
 DEFAULT_STATE = "watcher_state.json"
+COPY_BUFFER_BYTES = 1024 * 1024
 
 
 def now_local() -> datetime:
@@ -304,7 +305,10 @@ class Watcher:
 
         partial = destination.with_name(destination.name + ".micwatcher-part")
         try:
-            shutil.copy2(record.path, partial)
+            # Copy only file contents. GVFS/FUSE network mounts commonly reject the
+            # chmod/utime metadata operations performed by shutil.copy2.
+            with record.path.open("rb") as source_stream, partial.open("wb") as target_stream:
+                shutil.copyfileobj(source_stream, target_stream, length=COPY_BUFFER_BYTES)
             source_after = record.path.stat()
             partial_after = partial.stat()
             if (
