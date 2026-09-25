@@ -78,6 +78,7 @@ class Config:
 class TransferConfig:
     enabled: bool
     destination_folder: Path | None
+    check_interval_seconds: float
     stable_for_seconds: float
     max_files_per_check: int
 
@@ -153,6 +154,9 @@ def load_config(path: Path) -> Config:
         transfer=TransferConfig(
             enabled=transfer_enabled,
             destination_folder=config_path(destination_value) if destination_value else None,
+            check_interval_seconds=float(
+                transfer.get("check_interval_seconds", raw.get("check_interval_seconds", 300))
+            ),
             stable_for_seconds=float(transfer.get("stable_for_seconds", 60)),
             max_files_per_check=int(transfer.get("max_files_per_check", 10)),
         ),
@@ -167,6 +171,8 @@ def load_config(path: Path) -> Config:
         raise ValueError("transfer.destination_folder is required when transfer is enabled")
     if result.transfer.stable_for_seconds < 0:
         raise ValueError("transfer.stable_for_seconds cannot be negative")
+    if result.transfer.check_interval_seconds <= 0:
+        raise ValueError("transfer.check_interval_seconds must be greater than zero")
     if result.transfer.max_files_per_check <= 0:
         raise ValueError("transfer.max_files_per_check must be greater than zero")
     if result.transfer.enabled:
@@ -275,6 +281,29 @@ class Watcher:
         self.mailer = mailer
         self.clock = clock
         self.state = load_state(config.state_file)
+        configured_watch = str(config.watch_folder.resolve())
+        previous_watch = self.state.get("configured_watch_folder")
+        if previous_watch is not None and previous_watch != configured_watch:
+            LOG.info("Watched folder changed; resetting monitor and transfer state")
+            self.state = {}
+        self.state["configured_watch_folder"] = configured_watch
+        configured_destination = (
+            str(config.transfer.destination_folder.resolve())
+            if config.transfer.destination_folder is not None
+            else None
+        )
+        previous_destination = self.state.get("configured_transfer_destination")
+        if previous_destination is not None and previous_destination != configured_destination:
+            LOG.info("Transfer destination changed; resetting transfer status")
+            for key in (
+                "transfer_failed",
+                "transfer_failed_at",
+                "last_transfer_error",
+                "transfer_pending",
+                "transfer_pending_count",
+            ):
+                self.state.pop(key, None)
+        self.state["configured_transfer_destination"] = configured_destination
 
     def _send(self, subject: str, body: str) -> bool:
         try:
@@ -353,12 +382,6 @@ class Watcher:
 
     def _process_transfers(self, snapshot: FolderSnapshot, observed_at: datetime) -> int:
         if not self.config.transfer.enabled:
-            return 0
-
-        if "transfer_cutoff_mtime_ns" not in self.state:
-            self.state["transfer_cutoff_mtime_ns"] = snapshot.newest_mtime_ns
-            self.state["transfer_pending"] = {}
-            LOG.info("Transfer baseline established; existing files will remain local")
             return 0
 
         old_pending = self.state.get("transfer_pending", {})
@@ -457,21 +480,26 @@ class Watcher:
             lines.append(f"Last transfer error: {self.state.get('last_transfer_error', 'unknown')}")
         return "\n".join(lines)
 
-    def check_once(self) -> None:
+    def check_once(self, check_acquisition: bool = True, check_transfer: bool = True) -> None:
         observed_at = self.clock()
-        cutoff = self.state.get("transfer_cutoff_mtime_ns")
         try:
             snapshot = scan_folder(
                 self.config.watch_folder,
                 self.config.recursive,
-                int(cutoff) if self.config.transfer.enabled and cutoff is not None else None,
+                -1 if self.config.transfer.enabled and check_transfer else None,
             )
         except (FileNotFoundError, PermissionError, OSError) as exc:
             LOG.error("Cannot scan watched folder %s: %s", self.config.watch_folder, exc)
             snapshot = None
 
         initialized = "last_check_at" in self.state
-        activity = snapshot is not None and self._is_activity(snapshot)
+        direct_activity = snapshot is not None and self._is_activity(snapshot)
+        if not check_acquisition and direct_activity and snapshot is not None:
+            self.state["activity_since_acquisition_check"] = True
+            self.state["interim_activity_at"] = observed_at.isoformat()
+            self.state["interim_activity_file"] = snapshot.newest_file
+        interim_activity = bool(self.state.get("activity_since_acquisition_check", False))
+        activity = direct_activity or (check_acquisition and interim_activity)
         last_activity = parse_timestamp(self.state.get("last_activity_at"))
         inactivity_due = (
             initialized
@@ -480,10 +508,19 @@ class Watcher:
             >= self.config.check_interval_seconds
         )
 
-        if snapshot is not None:
+        if check_acquisition and snapshot is not None:
             if not initialized or activity:
-                self.state["last_activity_at"] = observed_at.isoformat()
-                self.state["last_activity_file"] = snapshot.newest_file
+                activity_at = (
+                    parse_timestamp(self.state.get("interim_activity_at"))
+                    if interim_activity and not direct_activity
+                    else observed_at
+                )
+                self.state["last_activity_at"] = (activity_at or observed_at).isoformat()
+                self.state["last_activity_file"] = (
+                    snapshot.newest_file
+                    if direct_activity
+                    else self.state.get("interim_activity_file")
+                )
 
             was_stalled = bool(self.state.get("stalled", False))
             if initialized and activity and was_stalled:
@@ -515,7 +552,10 @@ class Watcher:
             self.state["file_count"] = snapshot.file_count
             self.state["newest_mtime_ns"] = snapshot.newest_mtime_ns
             self.state["newest_file"] = snapshot.newest_file
-        elif initialized:
+            self.state.pop("activity_since_acquisition_check", None)
+            self.state.pop("interim_activity_at", None)
+            self.state.pop("interim_activity_file", None)
+        elif check_acquisition and initialized:
             subject = f"[WARNING] {self.config.microscope_name}: acquisition folder unavailable"
             body = (
                 f"The acquisition folder for {self.config.microscope_name} could not be read.\n\n"
@@ -526,7 +566,11 @@ class Watcher:
             self._send(subject, body)
             self.state["stalled"] = True
 
-        transferred = self._process_transfers(snapshot, observed_at) if snapshot is not None else 0
+        transferred = (
+            self._process_transfers(snapshot, observed_at)
+            if check_transfer and snapshot is not None
+            else 0
+        )
         report_snapshot = snapshot
         if snapshot is not None and transferred:
             report_snapshot = FolderSnapshot(
@@ -535,8 +579,9 @@ class Watcher:
                 snapshot.newest_file,
                 snapshot.transfer_files,
             )
-        self._maybe_send_daily_report(observed_at, report_snapshot)
-        self.state["last_check_at"] = observed_at.isoformat()
+        if check_acquisition:
+            self._maybe_send_daily_report(observed_at, report_snapshot)
+            self.state["last_check_at"] = observed_at.isoformat()
         save_state(self.config.state_file, self.state)
 
     def _maybe_send_daily_report(
@@ -627,20 +672,30 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     LOG.info(
-        "Watching %s every %.1f seconds for %s",
+        "Watching %s every %.1f seconds for %s; transfer check every %.1f seconds",
         config.watch_folder,
         config.check_interval_seconds,
         config.microscope_name,
+        config.transfer.check_interval_seconds,
     )
+    next_acquisition_check = time.monotonic()
+    next_transfer_check = time.monotonic() if config.transfer.enabled else float("inf")
     while True:
-        started = time.monotonic()
+        current = time.monotonic()
+        acquisition_due = current >= next_acquisition_check
+        transfer_due = config.transfer.enabled and current >= next_transfer_check
         try:
-            watcher.check_once()
+            if acquisition_due or transfer_due:
+                watcher.check_once(acquisition_due, transfer_due)
         except Exception:
             LOG.exception("Unexpected error during check; watcher will continue")
-        elapsed = time.monotonic() - started
+        current = time.monotonic()
+        if acquisition_due:
+            next_acquisition_check = current + config.check_interval_seconds
+        if transfer_due:
+            next_transfer_check = current + config.transfer.check_interval_seconds
         try:
-            time.sleep(max(1.0, config.check_interval_seconds - elapsed))
+            time.sleep(max(1.0, min(next_acquisition_check, next_transfer_check) - current))
         except KeyboardInterrupt:
             LOG.info("Watcher stopped")
             return 0

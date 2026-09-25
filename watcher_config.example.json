@@ -9,6 +9,7 @@
   "transfer": {
     "enabled": false,
     "destination_folder": "/mnt/network-drive/microscope-1",
+    "check_interval_seconds": 300,
     "stable_for_seconds": 60,
     "max_files_per_check": 10
   },

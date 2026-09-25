@@ -1,6 +1,7 @@
 watcher_config.json
 watcher_state.json
 watcher_state.json.tmp
+watcher_state.json.previous
 microscope_watcher.log
 watcher-console.log
 watcher.pid

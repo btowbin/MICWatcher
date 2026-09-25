@@ -33,6 +33,7 @@ Configure:
 - `to_addresses`: one or more alert recipients.
 - `transfer.enabled`: set to `true` to move stable new files to network storage.
 - `transfer.destination_folder`: the mounted network-drive destination for this microscope.
+- `transfer.check_interval_seconds`: how often transfer candidates are checked, independently of acquisition alarms.
 - `transfer.stable_for_seconds`: how long a file must remain unchanged before copying.
 - `transfer.max_files_per_check`: a load-control limit on copies per interval.
 
@@ -68,16 +69,30 @@ Mount the network drive through Ubuntu first, then enable transfer in `watcher_c
 "transfer": {
   "enabled": true,
   "destination_folder": "/mnt/network-drive/microscope-1",
+  "check_interval_seconds": 300,
   "stable_for_seconds": 60,
   "max_files_per_check": 10
 }
 ```
 
-Only files first observed after transfer is enabled are moved; existing files establish the initial baseline and remain local. A candidate must be unchanged across checks for at least `stable_for_seconds`. The watcher preserves its path relative to the acquisition folder, copies its contents through a bounded buffer to a `.micwatcher-part` file, confirms that the source did not change and that sizes match, finalizes the destination, and only then deletes the local source. It does not attempt to copy Unix metadata, which keeps it compatible with GVFS/FUSE network mounts.
+Files already present when MICWatcher starts are included, as are files created later. A candidate must be unchanged across checks for at least `stable_for_seconds`. The watcher preserves its path relative to the acquisition folder, copies its contents through a bounded buffer to a `.micwatcher-part` file, confirms that the source did not change and that sizes match, finalizes the destination, and only then deletes the local source. It does not attempt to copy Unix metadata, which keeps it compatible with GVFS/FUSE network mounts.
 
 If copying or local deletion fails, the source is retained and one warning email is sent. Repeated failures remain silent. A single recovery email is sent after a later file transfers successfully. The daily report includes transfer status, pending count, total transferred count, last success, and any active error.
 
 Use a destination unique to each microscope. The destination must not be inside the watched folder. Start with a low `max_files_per_check` and increase it only if transfers fall behind.
+
+## Install the desktop launcher
+
+Install it once for the current Ubuntu account; administrator rights are not required:
+
+```bash
+cd ~/MICWatcher
+python3 install_desktop_launcher.py
+```
+
+Double-click **MICWatcher** on the desktop, or open it from the Applications menu. A terminal asks for the alert email, local acquisition folder, missing-file check interval, whether transfer is enabled, and—when enabled—the mounted destination and transfer-check interval. Existing Gmail credentials and microscope identity remain unchanged. Press Enter to start, leave the terminal open, and use Ctrl+C to stop.
+
+Run the installer again after moving the repository to another path. If Ubuntu marks the desktop icon untrusted, right-click it and select **Allow Launching**.
 
 ## Start and stop manually
 

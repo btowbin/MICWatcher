@@ -43,7 +43,7 @@ class WatcherTests(unittest.TestCase):
             email=EmailConfig(
                 "smtp.test", 587, "starttls", "", "PASSWORD", "", "a@test", ("b@test",), 5
             ),
-            transfer=TransferConfig(False, None, 60, 10),
+            transfer=TransferConfig(False, None, 60, 60, 10),
         )
 
     def tearDown(self):
@@ -58,7 +58,7 @@ class WatcherTests(unittest.TestCase):
     def enable_transfer(self, destination=None):
         self.config = replace(
             self.config,
-            transfer=TransferConfig(True, destination or self.destination, 60, 10),
+            transfer=TransferConfig(True, destination or self.destination, 60, 60, 10),
         )
 
     def test_first_check_establishes_baseline_without_warning(self):
@@ -125,6 +125,41 @@ class WatcherTests(unittest.TestCase):
         destination = self.destination / "experiment" / "new.tif"
         self.assertFalse(source.exists())
         self.assertEqual(b"image-data", destination.read_bytes())
+
+    def test_existing_file_at_startup_is_transferred_when_stable(self):
+        self.enable_transfer()
+        source = self.folder / "already-present.tif"
+        source.write_bytes(b"existing-image")
+        watcher = self.watcher()
+        watcher.check_once()
+        self.assertTrue(source.exists())
+
+        self.time += timedelta(minutes=1)
+        watcher.check_once(False, True)
+        self.assertFalse(source.exists())
+        self.assertEqual(
+            b"existing-image", (self.destination / "already-present.tif").read_bytes()
+        )
+
+    def test_transfer_only_checks_preserve_acquisition_activity(self):
+        self.enable_transfer()
+        watcher = self.watcher()
+        watcher.check_once()
+        self.mailer.messages.clear()
+        source = self.folder / "between-alarm-checks.tif"
+        source.write_bytes(b"image")
+
+        self.time += timedelta(minutes=1)
+        watcher.check_once(False, True)
+        self.time += timedelta(minutes=1)
+        watcher.check_once(False, True)
+        self.assertFalse(source.exists())
+
+        self.time += timedelta(minutes=1)
+        watcher.check_once(True, False)
+        self.assertFalse(
+            any("no new images" in subject for subject, _ in self.mailer.messages)
+        )
 
     def test_transfer_failure_warns_once_then_reports_recovery(self):
         blocked_destination = self.root / "blocked"
