@@ -96,6 +96,8 @@ python3 install_desktop_launcher.py
 
 Double-click **MICWatcher** on the desktop, or open it from the Applications menu. A terminal asks for the alert email, local acquisition folder, missing-file check interval, whether transfer is enabled, and—when enabled—the mounted destination and transfer-check interval. Existing Gmail credentials and microscope identity remain unchanged. Press Enter to start, leave the terminal open, and use Ctrl+C to stop.
 
+The missing-file check defaults to 60 minutes, the transfer check defaults to 30 minutes, and the transfer destination has no default. See [LAUNCHER_GUIDE.md](LAUNCHER_GUIDE.md) for the complete illustrated operator workflow, including obtaining local and network paths from Ubuntu Files.
+
 Run the installer again after moving the repository to another path. If Ubuntu marks the desktop icon untrusted, right-click it and select **Allow Launching**.
 
 ## Start and stop manually

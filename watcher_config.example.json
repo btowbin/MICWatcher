@@ -2,14 +2,14 @@
   "microscope_name": "Microscope 1",
   "watch_folder": "/data/acquisition/images",
   "recursive": true,
-  "check_interval_seconds": 300,
+  "check_interval_seconds": 3600,
   "daily_report_interval_hours": 24,
   "state_file": "watcher_state.json",
   "log_file": "microscope_watcher.log",
   "transfer": {
     "enabled": false,
-    "destination_folder": "/mnt/network-drive/microscope-1",
-    "check_interval_seconds": 300,
+    "destination_folder": "",
+    "check_interval_seconds": 1800,
     "stable_for_seconds": 60,
     "max_files_per_check": null,
     "max_untransferred_files": 10000

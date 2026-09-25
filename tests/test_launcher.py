@@ -59,10 +59,10 @@ class LauncherTests(unittest.TestCase):
                 [
                     "new@example.org",
                     str(source),
-                    "15",
+                    "",
                     "y",
                     str(destination),
-                    "2",
+                    "",
                 ]
             )
             with (
@@ -75,9 +75,9 @@ class LauncherTests(unittest.TestCase):
             updated = json.loads(config_path.read_text(encoding="utf-8"))
             self.assertEqual(["new@example.org"], updated["email"]["to_addresses"])
             self.assertEqual("saved-app-password", updated["email"]["password"])
-            self.assertEqual(900, updated["check_interval_seconds"])
+            self.assertEqual(3600, updated["check_interval_seconds"])
             self.assertTrue(updated["transfer"]["enabled"])
-            self.assertEqual(120, updated["transfer"]["check_interval_seconds"])
+            self.assertEqual(1800, updated["transfer"]["check_interval_seconds"])
             self.assertIsNone(updated["transfer"]["max_files_per_check"])
             self.assertEqual(10_000, updated["transfer"]["max_untransferred_files"])
             self.assertEqual(str(destination), updated["transfer"]["destination_folder"])

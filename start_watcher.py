@@ -18,9 +18,10 @@ CONFIG_PATH = ROOT / "watcher_config.json"
 EXAMPLE_CONFIG_PATH = ROOT / "watcher_config.example.json"
 
 
-def prompt_text(label: str, default: str) -> str:
+def prompt_text(label: str, default: str = "") -> str:
     while True:
-        value = input(f"{label} [{default}]: ").strip() or default
+        prompt = f"{label} [{default}]: " if default else f"{label}: "
+        value = input(prompt).strip() or default
         if value:
             return value
         print("Please enter a value.")
@@ -114,7 +115,7 @@ def configure() -> bool:
 
     acquisition_interval = prompt_minutes(
         "Check interval for missing new files",
-        float(config.get("check_interval_seconds", 3600)),
+        3600,
     )
     transfer_enabled = prompt_yes_no(
         "Transfer stable files to a network folder",
@@ -122,14 +123,11 @@ def configure() -> bool:
     )
 
     destination: Path | None = None
-    transfer_interval = float(
-        transfer.get("check_interval_seconds", config.get("check_interval_seconds", 300))
-    )
+    transfer_interval = 1800.0
     if transfer_enabled:
         destination = expanded_path(
             prompt_text(
                 "Transfer destination folder",
-                str(transfer.get("destination_folder", "/mnt/network-drive/microscope-1")),
             )
         )
         if not destination.is_dir():
