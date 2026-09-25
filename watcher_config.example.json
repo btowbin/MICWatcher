@@ -1,0 +1,22 @@
+{
+  "microscope_name": "Microscope 1",
+  "watch_folder": "/data/acquisition/images",
+  "recursive": true,
+  "check_interval_seconds": 300,
+  "daily_report_interval_hours": 24,
+  "state_file": "watcher_state.json",
+  "log_file": "microscope_watcher.log",
+  "email": {
+    "smtp_host": "smtp.gmail.com",
+    "smtp_port": 587,
+    "security": "starttls",
+    "username": "your-watcher-account@gmail.com",
+    "password": "PASTE_GOOGLE_APP_PASSWORD_HERE",
+    "password_env": "MICROSCOPE_WATCHER_SMTP_PASSWORD",
+    "from_address": "your-watcher-account@gmail.com",
+    "to_addresses": [
+      "lab-manager@example.org"
+    ],
+    "timeout_seconds": 30
+  }
+}
