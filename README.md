@@ -1,8 +1,8 @@
 # Microscope acquisition watcher
 
-A dependency-free Python program for monitoring long-running microscope acquisitions. It checks whether new or updated files appear, emails a warning after each inactive interval, sends a recovery notice when acquisition resumes, and sends a disk/file-count report every 24 hours.
+A dependency-free Python program for monitoring long-running microscope acquisitions. It checks whether new or updated files appear, sends up to two warning emails during an interruption, sends a recovery notice when acquisition resumes, and sends a disk/file-count report every 24 hours. Optional Twilio SMS alerts can provide one short warning at the start of an acquisition or transfer problem.
 
-Each microscope runs its own copy with its own name, acquisition folder, interval, recipients, and persistent state.
+Each microscope runs its own copy with its own experiment/microscope name, acquisition folder, intervals, and recipients.
 
 ## Requirements
 
@@ -10,6 +10,7 @@ Each microscope runs its own copy with its own name, acquisition folder, interva
 - Python 3.10 or newer
 - Python Tk support (`python3-tk`) for the graphical launcher
 - A Gmail account with 2-Step Verification and a generated app password
+- Optional: a Twilio account and SMS-capable Twilio sender number
 
 No third-party Python packages are required. Ubuntu may not install Tk support by default; if it is missing, an administrator must run `sudo apt install python3-tk` once. Normal installation and operation do not require administrator rights.
 
@@ -26,7 +27,7 @@ nano watcher_config.json
 
 Configure:
 
-- `microscope_name`: a unique, recognizable microscope name.
+- `microscope_name`: the initial GUI value; the operator can enter the experiment or microscope name for every run.
 - `watch_folder`: the Linux acquisition path, for example `/data/acquisition/images`.
 - `check_interval_seconds`: longer than the normal maximum gap between images.
 - `username` and `from_address`: the watcher Gmail address.
@@ -38,6 +39,7 @@ Configure:
 - `transfer.stable_for_seconds`: how long a file must remain unchanged before copying.
 - `transfer.max_files_per_check`: optional per-check limit; `null` means no limit.
 - `transfer.max_untransferred_files`: backlog safety limit; the default is 10,000.
+- `sms.account_sid`, `sms.auth_token`, and `sms.from_number`: administrator-supplied Twilio credentials and sender number. Leave `sms.enabled` false until these are configured.
 
 Keep the Gmail SMTP settings as supplied in the example. Protect the local configuration containing the app password:
 
@@ -86,6 +88,28 @@ Use a destination unique to each microscope. The destination must not be inside 
 
 If the number of untransferred local files exceeds `max_untransferred_files` (10,000 by default), MICWatcher sends a `[SAFETY STOP]` email, saves its state, retains every local file, and exits. Resolve the network or backlog problem before restarting it.
 
+## Optional Twilio SMS warnings
+
+Configure the shared sender credentials once in `watcher_config.json`:
+
+```json
+"sms": {
+  "enabled": false,
+  "account_sid": "AC...",
+  "auth_token": "your_twilio_auth_token",
+  "auth_token_env": "MICWATCHER_TWILIO_AUTH_TOKEN",
+  "from_number": "+15017122661",
+  "to_number": "",
+  "timeout_seconds": 30
+}
+```
+
+The Auth Token may be stored directly in `auth_token`, or kept in the environment variable named by `auth_token_env`. Operators enable SMS in the GUI and enter the recipient in international format, such as `+41791234567`. SMS has a small per-message cost.
+
+Only the first missing-file warning and the first transfer-failure warning for an incident produce an SMS. Recovery messages, the second inactivity warning, daily reports, and the backlog safety-stop message remain email-only. If Twilio rejects a message or cannot be reached, the error is written to `microscope_watcher.log`; monitoring, email alerts, and file transfer continue. MICWatcher does not repeatedly retry SMS for the same incident.
+
+Twilio trial-account restrictions may prevent these custom warning texts from being sent. Use an SMS-capable sender and an upgraded Twilio account for normal operation.
+
 ## Install the graphical desktop launcher
 
 Install it once for the current Ubuntu account; administrator rights are not required:
@@ -97,14 +121,16 @@ python3 install_desktop_launcher.py
 
 Double-click **MICWatcher** on the desktop, or open it from the Applications menu. A graphical window lets operators:
 
+- Enter an experiment or microscope name used in every email and SMS.
 - Enter the alert recipient.
+- Optionally enable one SMS per new warning and enter its recipient number.
 - Type a folder path or select it with **Browse...**.
 - Set the missing-file and transfer intervals.
 - Enable or disable network transfer.
 - Start and stop monitoring.
 - See acquisition, file-count, transfer, and error status.
 
-Keep the GUI open while the experiment is running. Closing it while monitoring asks for confirmation and stops safely after the current check or file copy finishes. Existing Gmail credentials and microscope identity remain unchanged.
+Keep the GUI open while the experiment is running. Closing it while monitoring asks for confirmation and stops safely after the current check or file copy finishes. Shared Gmail and Twilio sender credentials remain unchanged when operators edit the GUI fields.
 
 The missing-file check defaults to 60 minutes, the transfer check defaults to 30 minutes, and the transfer destination has no default. See [LAUNCHER_GUIDE.md](LAUNCHER_GUIDE.md) for the complete operator workflow, including browsing or copying local and network paths from Ubuntu Files.
 
@@ -138,7 +164,8 @@ kill "$(cat ~/microscope-watcher/watcher.pid)"
 ## Operations
 
 - `microscope_watcher.log` records activity and email failures.
-- `watcher_state.json` preserves activity, alert, and report state across restarts.
+- `watcher_state.json` records diagnostics for the current run. Its runtime state is deliberately ignored when a new monitoring run starts.
+- Every click of **Start monitoring** begins a fresh run, including after **Stop**, an app relaunch, or reuse of the same name and folders. Warning suppression, daily-report timing, transfer stability tracking, pending lists, and session counters are reset.
 - At most two inactivity warnings are sent for one interruption. Further checks remain silent until a recovery email reports that files are appearing again.
 - A separate warning is sent when the acquisition folder cannot be read.
 - Failed email delivery is retried on a later check.

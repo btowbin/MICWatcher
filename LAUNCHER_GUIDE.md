@@ -64,12 +64,15 @@ There is deliberately no default destination: the user must select the correct n
 
 The GUI contains:
 
-1. **Alert email address** — the address that receives warnings and daily reports.
-2. **Local acquisition folder** — type, paste, or browse to the experiment folder.
-3. **Missing-file check** — default: **60 minutes**.
-4. **Transfer stable files to a network folder** — enable this checkbox when required.
-5. **Transfer destination** — type, paste, or browse to the mounted folder. There is no default.
-6. **Transfer check** — default: **30 minutes**.
+1. **Experiment / microscope name** — identify this particular run, for example `Embryo screen 42 / SQUID 2`. This name appears in all email subjects and SMS warnings.
+2. **Alert email address** — the address that receives warnings, recoveries, and daily reports.
+3. **Send one SMS for each new warning** — optional; SMS has a small per-message cost.
+4. **SMS recipient number** — when SMS is enabled, enter the phone number in international format, for example `+41791234567`.
+5. **Local acquisition folder** — type, paste, or browse to the experiment folder.
+6. **Missing-file check** — default: **60 minutes**.
+7. **Transfer stable files to a network folder** — enable this checkbox when required.
+8. **Transfer destination** — type, paste, or browse to the mounted folder. There is no default.
+9. **Transfer check** — default: **30 minutes**.
 
 Review the settings, then click **Start monitoring**.
 
@@ -82,12 +85,16 @@ Review the settings, then click **Start monitoring**.
 - A local file is deleted only after its network copy is completed and size-verified.
 - The first two missing-file checks send warning emails. Further warnings remain silent until a recovery email reports that files are appearing again.
 - A transfer failure sends one warning; a later successful transfer sends a recovery email.
+- When SMS is enabled, only the first missing-file warning and first transfer-failure warning for an incident also send an SMS. The second email, recovery emails, daily reports, and safety-stop email do not send SMS.
+- If SMS delivery fails, MICWatcher records the error in its log and continues monitoring, transferring, and sending email normally. It does not repeatedly retry that incident's SMS.
 - If more than 10,000 files are waiting for transfer, MICWatcher emails a safety warning, preserves the local files, and stops.
 - The network location must remain connected while transfer is enabled.
 
 ## 6. Stop MICWatcher
 
 Click **Stop**. If a scan or file copy is active, MICWatcher waits for it to finish safely. Closing the window while monitoring asks for confirmation before stopping. Files already copied and verified remain on the network drive; untransferred files remain local.
+
+The next click of **Start monitoring** is always a fresh run, even when the same experiment name and folders are reused. Previous warning suppression, report timing, transfer stability state, pending-file tracking, and session counters are not carried over. The configured sender credentials remain saved.
 
 ## Troubleshooting
 

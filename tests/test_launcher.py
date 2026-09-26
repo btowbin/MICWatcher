@@ -36,7 +36,15 @@ class LauncherTests(unittest.TestCase):
             source.mkdir()
             destination.mkdir()
             settings = micwatcher_gui.validate_operator_settings(
-                "operator@example.org", str(source), "60", True, str(destination), "30"
+                "operator@example.org",
+                str(source),
+                "60",
+                True,
+                str(destination),
+                "30",
+                False,
+                "",
+                "Experiment 42 / SQUID 2",
             )
             existing = {
                 "watch_folder": "/old",
@@ -48,6 +56,7 @@ class LauncherTests(unittest.TestCase):
                 "transfer": {"max_files_per_check": None},
             }
             updated = micwatcher_gui.apply_operator_settings(existing, settings)
+            self.assertEqual("Experiment 42 / SQUID 2", updated["microscope_name"])
             self.assertEqual("secret", updated["email"]["password"])
             self.assertEqual(["operator@example.org"], updated["email"]["to_addresses"])
             self.assertEqual(3600, updated["check_interval_seconds"])
@@ -61,6 +70,73 @@ class LauncherTests(unittest.TestCase):
             )
             self.assertFalse(settings.transfer_enabled)
             self.assertIsNone(settings.destination_folder)
+
+    def test_sms_number_is_normalized_and_credentials_are_preserved(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            settings = micwatcher_gui.validate_operator_settings(
+                "operator@example.org",
+                temporary,
+                "60",
+                False,
+                "",
+                "30",
+                True,
+                "+41 79 123 45 67",
+            )
+            existing = {
+                "email": {},
+                "transfer": {},
+                "sms": {
+                    "account_sid": "AC123",
+                    "auth_token": "secret",
+                    "from_number": "+15017122661",
+                },
+            }
+            updated = micwatcher_gui.apply_operator_settings(existing, settings)
+            self.assertTrue(updated["sms"]["enabled"])
+            self.assertEqual("+41791234567", updated["sms"]["to_number"])
+            self.assertEqual("secret", updated["sms"]["auth_token"])
+
+    def test_enabled_sms_requires_international_phone_number(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(ValueError, "international format"):
+                micwatcher_gui.validate_operator_settings(
+                    "operator@example.org",
+                    temporary,
+                    "60",
+                    False,
+                    "",
+                    "30",
+                    True,
+                    "079 123 45 67",
+                )
+
+    def test_experiment_name_is_required_and_must_be_one_line(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(ValueError, "experiment or microscope name"):
+                micwatcher_gui.validate_operator_settings(
+                    "operator@example.org",
+                    temporary,
+                    "60",
+                    False,
+                    "",
+                    "30",
+                    False,
+                    "",
+                    "   ",
+                )
+            with self.assertRaisesRegex(ValueError, "one line"):
+                micwatcher_gui.validate_operator_settings(
+                    "operator@example.org",
+                    temporary,
+                    "60",
+                    False,
+                    "",
+                    "30",
+                    False,
+                    "",
+                    "Scope A\nInjected subject",
+                )
 
     def test_configure_updates_operator_fields_and_preserves_credentials(self):
         with tempfile.TemporaryDirectory() as temporary:
