@@ -6,14 +6,61 @@ from unittest.mock import patch
 
 import start_watcher
 import install_desktop_launcher
+import micwatcher_gui
 
 
 class LauncherTests(unittest.TestCase):
-    def test_desktop_launcher_opens_terminal(self):
+    def test_desktop_launcher_opens_gui(self):
         contents = install_desktop_launcher.launcher_contents()
         self.assertIn("Name=MICWatcher", contents)
-        self.assertIn("Terminal=true", contents)
-        self.assertIn("start_watcher.py", contents)
+        self.assertIn("Terminal=false", contents)
+        self.assertIn("micwatcher_gui.py", contents)
+
+    def test_instance_lock_prevents_a_second_launcher(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            lock_path = Path(temporary) / ".micwatcher.lock"
+            with patch.object(start_watcher, "INSTANCE_LOCK_PATH", lock_path):
+                first = start_watcher.acquire_instance_lock()
+                self.assertIsNotNone(first)
+                try:
+                    self.assertIsNone(start_watcher.acquire_instance_lock())
+                finally:
+                    assert first is not None
+                    first.close()
+
+    def test_gui_settings_are_validated_and_preserve_credentials(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "images"
+            destination = root / "network"
+            source.mkdir()
+            destination.mkdir()
+            settings = micwatcher_gui.validate_operator_settings(
+                "operator@example.org", str(source), "60", True, str(destination), "30"
+            )
+            existing = {
+                "watch_folder": "/old",
+                "email": {
+                    "username": "watcher@gmail.com",
+                    "password": "secret",
+                    "to_addresses": ["old@example.org"],
+                },
+                "transfer": {"max_files_per_check": None},
+            }
+            updated = micwatcher_gui.apply_operator_settings(existing, settings)
+            self.assertEqual("secret", updated["email"]["password"])
+            self.assertEqual(["operator@example.org"], updated["email"]["to_addresses"])
+            self.assertEqual(3600, updated["check_interval_seconds"])
+            self.assertEqual(1800, updated["transfer"]["check_interval_seconds"])
+            self.assertEqual(str(destination.resolve()), updated["transfer"]["destination_folder"])
+
+    def test_disabled_transfer_does_not_require_transfer_fields(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            settings = micwatcher_gui.validate_operator_settings(
+                "operator@example.org", temporary, "60", False, "", "not a number"
+            )
+            self.assertFalse(settings.transfer_enabled)
+            self.assertIsNone(settings.destination_folder)
 
     def test_configure_updates_operator_fields_and_preserves_credentials(self):
         with tempfile.TemporaryDirectory() as temporary:

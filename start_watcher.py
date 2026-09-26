@@ -5,10 +5,14 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import subprocess
-import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
+
+try:
+    import fcntl
+except ImportError:  # Windows development/test environment
+    fcntl = None  # type: ignore[assignment]
+    import msvcrt
 
 from microscope_watcher import load_config, main as watcher_main
 
@@ -16,6 +20,7 @@ from microscope_watcher import load_config, main as watcher_main
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "watcher_config.json"
 EXAMPLE_CONFIG_PATH = ROOT / "watcher_config.example.json"
+INSTANCE_LOCK_PATH = ROOT / ".micwatcher.lock"
 
 
 def prompt_text(label: str, default: str = "") -> str:
@@ -58,18 +63,23 @@ def expanded_path(value: str) -> Path:
     return Path(os.path.expandvars(os.path.expanduser(value))).resolve()
 
 
-def running_watcher() -> str | None:
+def acquire_instance_lock() -> BinaryIO | None:
+    """Hold a cross-process lock while MICWatcher is running."""
+    handle = INSTANCE_LOCK_PATH.open("a+b")
     try:
-        result = subprocess.run(
-            ["pgrep", "-af", "microscope_watcher.py"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except FileNotFoundError:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        else:
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write(b"\0")
+                handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        handle.close()
         return None
-    lines = [line for line in result.stdout.splitlines() if line.strip()]
-    return "\n".join(lines) if lines else None
+    return handle
 
 
 def load_editable_config() -> dict[str, Any]:
@@ -183,10 +193,10 @@ def configure() -> bool:
 
 
 def main() -> int:
-    existing = running_watcher()
-    if existing:
-        print("MICWatcher is already running. Stop it before starting another copy:\n")
-        print(existing)
+    instance_lock = acquire_instance_lock()
+    if instance_lock is None:
+        print("MICWatcher is already running from this installation.")
+        print("Stop it before starting another copy.")
         input("\nPress Enter to close this window.")
         return 1
     try:
@@ -202,6 +212,8 @@ def main() -> int:
         print(f"\nSetup failed: {exc}")
         input("Press Enter to close this window.")
         return 2
+    finally:
+        instance_lock.close()
 
 
 if __name__ == "__main__":

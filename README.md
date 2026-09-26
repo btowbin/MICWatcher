@@ -8,17 +8,18 @@ Each microscope runs its own copy with its own name, acquisition folder, interva
 
 - Ubuntu Linux
 - Python 3.10 or newer
+- Python Tk support (`python3-tk`) for the graphical launcher
 - A Gmail account with 2-Step Verification and a generated app password
 
-No third-party Python packages or administrator rights are required when Python is installed and the current user can read the acquisition folder.
+No third-party Python packages are required. Ubuntu may not install Tk support by default; if it is missing, an administrator must run `sudo apt install python3-tk` once. Normal installation and operation do not require administrator rights.
 
 ## Download and configure
 
 Once this repository is published, run on the microscope computer:
 
 ```bash
-git clone REPOSITORY_URL microscope-watcher
-cd microscope-watcher
+git clone https://github.com/btowbin/MICWatcher.git
+cd MICWatcher
 cp watcher_config.example.json watcher_config.json
 nano watcher_config.json
 ```
@@ -85,7 +86,7 @@ Use a destination unique to each microscope. The destination must not be inside 
 
 If the number of untransferred local files exceeds `max_untransferred_files` (10,000 by default), MICWatcher sends a `[SAFETY STOP]` email, saves its state, retains every local file, and exits. Resolve the network or backlog problem before restarting it.
 
-## Install the desktop launcher
+## Install the graphical desktop launcher
 
 Install it once for the current Ubuntu account; administrator rights are not required:
 
@@ -94,11 +95,20 @@ cd ~/MICWatcher
 python3 install_desktop_launcher.py
 ```
 
-Double-click **MICWatcher** on the desktop, or open it from the Applications menu. A terminal asks for the alert email, local acquisition folder, missing-file check interval, whether transfer is enabled, and—when enabled—the mounted destination and transfer-check interval. Existing Gmail credentials and microscope identity remain unchanged. Press Enter to start, leave the terminal open, and use Ctrl+C to stop.
+Double-click **MICWatcher** on the desktop, or open it from the Applications menu. A graphical window lets operators:
 
-The missing-file check defaults to 60 minutes, the transfer check defaults to 30 minutes, and the transfer destination has no default. See [LAUNCHER_GUIDE.md](LAUNCHER_GUIDE.md) for the complete illustrated operator workflow, including obtaining local and network paths from Ubuntu Files.
+- Enter the alert recipient.
+- Type a folder path or select it with **Browse...**.
+- Set the missing-file and transfer intervals.
+- Enable or disable network transfer.
+- Start and stop monitoring.
+- See acquisition, file-count, transfer, and error status.
 
-Run the installer again after moving the repository to another path. If Ubuntu marks the desktop icon untrusted, right-click it and select **Allow Launching**.
+Keep the GUI open while the experiment is running. Closing it while monitoring asks for confirmation and stops safely after the current check or file copy finishes. Existing Gmail credentials and microscope identity remain unchanged.
+
+The missing-file check defaults to 60 minutes, the transfer check defaults to 30 minutes, and the transfer destination has no default. See [LAUNCHER_GUIDE.md](LAUNCHER_GUIDE.md) for the complete operator workflow, including browsing or copying local and network paths from Ubuntu Files.
+
+The installer verifies that Tkinter is available and prints the required `python3-tk` installation command if it is missing. Run the installer again after moving the repository to another path. If Ubuntu marks the desktop icon untrusted, right-click it and select **Allow Launching**.
 
 ## Start and stop manually
 
@@ -141,9 +151,12 @@ kill "$(cat ~/microscope-watcher/watcher.pid)"
 Local configuration is preserved during updates:
 
 ```bash
-cd ~/microscope-watcher
+cd ~/MICWatcher
 git pull
+python3 install_desktop_launcher.py
 ```
+
+Rerunning the installer refreshes the desktop/Application launcher and does not overwrite `watcher_config.json`.
 
 ## Run automated tests
 

@@ -1,4 +1,4 @@
-"""Install a per-user Ubuntu desktop/application launcher for MICWatcher."""
+"""Install the per-account Ubuntu graphical launcher for MICWatcher."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-LAUNCHER_SCRIPT = ROOT / "start_watcher.py"
+LAUNCHER_SCRIPT = ROOT / "micwatcher_gui.py"
 
 
 def desktop_directory() -> Path:
@@ -37,9 +37,10 @@ def launcher_contents() -> str:
         "Comment=Configure and start microscope monitoring\n"
         f'Exec="{python}" "{LAUNCHER_SCRIPT}"\n'
         f"Path={ROOT}\n"
-        "Terminal=true\n"
-        "Icon=utilities-terminal\n"
+        "Terminal=false\n"
+        "Icon=utilities-system-monitor\n"
         "Categories=Utility;Science;\n"
+        "StartupNotify=true\n"
     )
 
 
@@ -50,6 +51,20 @@ def install_file(path: Path, contents: str) -> None:
 
 
 def main() -> int:
+    tkinter_check = subprocess.run(
+        [sys.executable, "-c", "import tkinter"],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if tkinter_check.returncode != 0:
+        print("MICWatcher needs Ubuntu's Python Tk package for its graphical interface.")
+        print("Ask an administrator to run: sudo apt install python3-tk")
+        return 2
+    if not LAUNCHER_SCRIPT.is_file():
+        print(f"GUI launcher script not found: {LAUNCHER_SCRIPT}")
+        return 2
+
     contents = launcher_contents()
     application = Path.home() / ".local/share/applications/micwatcher.desktop"
     install_file(application, contents)
