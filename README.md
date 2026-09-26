@@ -11,6 +11,7 @@ Each microscope runs its own copy with its own experiment/microscope name, acqui
 - Python Tk support (`python3-tk`) for the graphical launcher
 - A Gmail account with 2-Step Verification and a generated app password
 - Optional: a Twilio account and SMS-capable Twilio sender number
+- Optional: a Telegram bot that is an administrator of the reporting channel
 
 No third-party Python packages are required. Ubuntu may not install Tk support by default; if it is missing, an administrator must run `sudo apt install python3-tk` once. Normal installation and operation do not require administrator rights.
 
@@ -40,6 +41,7 @@ Configure:
 - `transfer.max_files_per_check`: optional per-check limit; `null` means no limit.
 - `transfer.max_untransferred_files`: backlog safety limit; the default is 10,000.
 - `sms.account_sid`, `sms.auth_token`, and `sms.from_number`: administrator-supplied Twilio credentials and sender number. Leave `sms.enabled` false until these are configured.
+- `telegram.bot_token` and `telegram.chat_id`: administrator-supplied Telegram bot token and destination channel. Leave `telegram.enabled` false until these are configured.
 
 Keep the Gmail SMTP settings as supplied in the example. Protect the local configuration containing the app password:
 
@@ -110,6 +112,24 @@ Only the first missing-file warning and the first transfer-failure warning for a
 
 Twilio trial-account restrictions may prevent these custom warning texts from being sent. Use an SMS-capable sender and an upgraded Twilio account for normal operation.
 
+## Optional Telegram channel warnings
+
+Create a bot with Telegram's `@BotFather`, add that bot to the destination channel as an administrator with permission to post, and configure:
+
+```json
+"telegram": {
+  "enabled": false,
+  "bot_token": "123456789:your_bot_token",
+  "bot_token_env": "MICWATCHER_TELEGRAM_BOT_TOKEN",
+  "chat_id": "@your_channel_username",
+  "timeout_seconds": 30
+}
+```
+
+For a public channel, `chat_id` can be its `@channelusername`. A private channel normally uses its numeric Bot API ID beginning with `-100`. The token may instead be supplied through the environment variable named by `bot_token_env`.
+
+Operators can enable or disable Telegram reporting in the GUI; they cannot see or edit the stored bot token there. Telegram follows the same one-message-per-incident policy as SMS. A Telegram failure is logged and does not interrupt email, SMS, monitoring, or transfers.
+
 ## Install the graphical desktop launcher
 
 Install it once for the current Ubuntu account; administrator rights are not required:
@@ -124,6 +144,7 @@ Double-click **MICWatcher** on the desktop, or open it from the Applications men
 - Enter an experiment or microscope name used in every email and SMS.
 - Enter the alert recipient.
 - Optionally enable one SMS per new warning and enter its recipient number.
+- Optionally enable warnings to the configured Telegram channel.
 - Type a folder path or select it with **Browse...**.
 - Set the missing-file and transfer intervals.
 - Enable or disable network transfer.

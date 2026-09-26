@@ -68,11 +68,12 @@ The GUI contains:
 2. **Alert email address** — the address that receives warnings, recoveries, and daily reports.
 3. **Send one SMS for each new warning** — optional; SMS has a small per-message cost.
 4. **SMS recipient number** — when SMS is enabled, enter the phone number in international format, for example `+41791234567`.
-5. **Local acquisition folder** — type, paste, or browse to the experiment folder.
-6. **Missing-file check** — default: **60 minutes**.
-7. **Transfer stable files to a network folder** — enable this checkbox when required.
-8. **Transfer destination** — type, paste, or browse to the mounted folder. There is no default.
-9. **Transfer check** — default: **30 minutes**.
+5. **Send warnings to the configured Telegram channel** — optional; the administrator must configure the bot and channel first.
+6. **Local acquisition folder** — type, paste, or browse to the experiment folder.
+7. **Missing-file check** — default: **60 minutes**.
+8. **Transfer stable files to a network folder** — enable this checkbox when required.
+9. **Transfer destination** — type, paste, or browse to the mounted folder. There is no default.
+10. **Transfer check** — default: **30 minutes**.
 
 Review the settings, then click **Start monitoring**.
 
@@ -87,6 +88,7 @@ Review the settings, then click **Start monitoring**.
 - A transfer failure sends one warning; a later successful transfer sends a recovery email.
 - When SMS is enabled, only the first missing-file warning and first transfer-failure warning for an incident also send an SMS. The second email, recovery emails, daily reports, and safety-stop email do not send SMS.
 - If SMS delivery fails, MICWatcher records the error in its log and continues monitoring, transferring, and sending email normally. It does not repeatedly retry that incident's SMS.
+- Telegram uses the same warning policy as SMS. Telegram failures are logged and do not affect any other MICWatcher function.
 - If more than 10,000 files are waiting for transfer, MICWatcher emails a safety warning, preserves the local files, and stops.
 - The network location must remain connected while transfer is enabled.
 
