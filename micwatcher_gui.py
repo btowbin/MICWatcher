@@ -89,6 +89,8 @@ def validate_operator_settings(
     if "@" not in recipient or recipient.startswith("@") or recipient.endswith("@"):
         raise ValueError("Enter a valid alert email address.")
 
+    if not watch_folder.strip().strip('"').strip():
+        raise ValueError("Choose or enter a local acquisition folder.")
     source = normalized_path(watch_folder)
     if not source.is_dir():
         raise ValueError(f"The local acquisition folder does not exist:\n{source}")
@@ -102,7 +104,7 @@ def validate_operator_settings(
     transfer_seconds = 1800.0
     if transfer_enabled:
         transfer_seconds = positive_minutes(transfer_minutes, "Transfer check interval")
-        if not destination_folder.strip():
+        if not destination_folder.strip().strip('"').strip():
             raise ValueError("Choose or enter a transfer destination folder.")
         destination = normalized_path(destination_folder)
         if not destination.is_dir():
@@ -327,7 +329,9 @@ class MICWatcherApp:
         self.microscope_name = tk.StringVar(
             value=str(config.get("microscope_name", "Microscope"))
         )
-        self.watch_folder = tk.StringVar(value=str(config.get("watch_folder", "")))
+        # Folder choices are experiment-specific and must be made explicitly for
+        # every monitoring run. Never fall back to a saved path or the home folder.
+        self.watch_folder = tk.StringVar(value="")
         self.acquisition_minutes = tk.StringVar(value="60")
         self.sms_enabled = tk.BooleanVar(value=bool(sms.get("enabled", False)))
         self.sms_to_number = tk.StringVar(value=str(sms.get("to_number", "")))
@@ -555,7 +559,10 @@ class MICWatcherApp:
 
         try:
             existing = start_watcher.load_editable_config()
-            old_watch = normalized_path(str(existing.get("watch_folder", Path.home())))
+            old_watch_value = str(existing.get("watch_folder", "")).strip()
+            old_watch = (
+                normalized_path(old_watch_value) if old_watch_value else settings.watch_folder
+            )
             candidate = apply_operator_settings(existing, settings)
             config = validate_candidate_config(candidate)
             archive_previous_state(config, old_watch)
@@ -599,7 +606,12 @@ class MICWatcherApp:
         if not self.transfer_enabled.get():
             self.transfer_detail.set("File transfer: disabled")
             return
-        transfer_status = "FAILED" if state.get("transfer_failed") else "OK"
+        conflicts = state.get("destination_conflicts", [])
+        if not isinstance(conflicts, list):
+            conflicts = []
+        transfer_status = (
+            "FAILED" if state.get("transfer_failed") else "ATTENTION" if conflicts else "OK"
+        )
         pending = int(state.get("transfer_pending_count", 0))
         total = int(state.get("files_transferred_total", 0))
         text = (
@@ -608,6 +620,11 @@ class MICWatcherApp:
         )
         if state.get("last_transfer_error"):
             text += f"\nLast error: {state['last_transfer_error']}"
+        if conflicts:
+            shown = ", ".join(str(name) for name in conflicts[:5])
+            if len(conflicts) > 5:
+                shown += f", and {len(conflicts) - 5:,} more"
+            text += f"\nAlready at destination; kept locally: {shown}"
         self.transfer_detail.set(text)
 
     def finish_worker(self, message: str) -> None:

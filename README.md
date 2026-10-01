@@ -84,7 +84,9 @@ Mount the network drive through Ubuntu first, then enable transfer in `watcher_c
 
 Files already present when MICWatcher starts are included, as are files created later. A candidate must be unchanged across checks for at least `stable_for_seconds`. The watcher preserves its path relative to the acquisition folder, copies its contents through a bounded buffer to a `.micwatcher-part` file, confirms that the source did not change and that sizes match, finalizes the destination, and only then deletes the local source. It does not attempt to copy Unix metadata, which keeps it compatible with GVFS/FUSE network mounts.
 
-If copying or local deletion fails, the source is retained and one warning email is sent. Repeated failures remain silent. A single recovery email is sent after a later file transfers successfully. The daily report includes transfer status, pending count, total transferred count, last success, and any active error.
+If a file already exists at the destination, MICWatcher keeps the local source, records its relative path, and continues copying the other eligible files. It sends at most one destination-conflict email per monitoring run, even if further conflicting files are discovered during later checks. Active conflicts and their file names still appear in the GUI and daily report. After a destination conflict is resolved, MICWatcher retries the retained local file on a later check.
+
+If another copying or local deletion error occurs, the source is retained and one warning email is sent. Repeated failures remain silent. A single recovery email is sent after a later file transfers successfully. The daily report includes transfer status, pending count, total transferred count, last success, destination conflicts, and any active error.
 
 Use a destination unique to each microscope. The destination must not be inside the watched folder. By default there is no per-check transfer count limit, so every stable candidate is processed. A numeric `max_files_per_check` can still be configured when deliberate throttling is needed.
 
@@ -153,7 +155,7 @@ Double-click **MICWatcher** on the desktop, or open it from the Applications men
 
 Keep the GUI open while the experiment is running. Closing it while monitoring asks for confirmation and stops safely after the current check or file copy finishes. Shared Gmail and Twilio sender credentials remain unchanged when operators edit the GUI fields.
 
-The missing-file check defaults to 60 minutes, the transfer check defaults to 30 minutes, and the transfer destination has no default. See [LAUNCHER_GUIDE.md](LAUNCHER_GUIDE.md) for the complete operator workflow, including browsing or copying local and network paths from Ubuntu Files.
+The missing-file check defaults to 60 minutes and the transfer check defaults to 30 minutes. There is no default acquisition folder or transfer destination; both are experiment-specific. MICWatcher refuses to start if the acquisition folder is blank or nonexistent, or if transfer is enabled while its destination is blank, disconnected, or nonexistent. See [LAUNCHER_GUIDE.md](LAUNCHER_GUIDE.md) for the complete operator workflow, including browsing or copying local and network paths from Ubuntu Files.
 
 The installer verifies that Tkinter is available and prints the required `python3-tk` installation command if it is missing. Run the installer again after moving the repository to another path. If Ubuntu marks the desktop icon untrusted, right-click it and select **Allow Launching**.
 

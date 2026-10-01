@@ -58,7 +58,7 @@ If the mounted network folder is not visible in the browser, obtain its current 
 4. Select the complete path and press **Ctrl+Shift+C**.
 5. Paste it into the destination field in MICWatcher.
 
-There is deliberately no default destination: the user must select the correct network folder for each experiment.
+There is deliberately no default acquisition folder or transfer destination: the user must select the correct folders for each experiment.
 
 ## 4. Start MICWatcher
 
@@ -77,6 +77,8 @@ The GUI contains:
 
 Review the settings, then click **Start monitoring**.
 
+MICWatcher refuses to start if the local acquisition folder is blank or does not exist. When network transfer is selected, it also refuses to start if the transfer destination is blank, disconnected, or does not exist. A message identifies the field that must be corrected.
+
 ## 5. While MICWatcher is running
 
 - Leave the MICWatcher window open.
@@ -85,7 +87,8 @@ Review the settings, then click **Start monitoring**.
 - Files already present in the acquisition folder are eligible for transfer after they remain unchanged long enough to be considered complete.
 - A local file is deleted only after its network copy is completed and size-verified.
 - The first two missing-file checks send warning emails. Further warnings remain silent until a recovery email reports that files are appearing again.
-- A transfer failure sends one warning; a later successful transfer sends a recovery email.
+- If a file already exists at the destination, it remains in the local folder and the other files continue copying. MICWatcher sends only one destination-conflict email during that monitoring run, even if later checks find more conflicts. The current conflicting file names appear in the status panel and daily report.
+- Another transfer failure sends one warning; a later successful transfer sends a recovery email.
 - When SMS is enabled, only the first missing-file warning and first transfer-failure warning for an incident also send an SMS. The second email, recovery emails, daily reports, and safety-stop email do not send SMS.
 - If SMS delivery fails, MICWatcher records the error in its log and continues monitoring, transferring, and sending email normally. It does not repeatedly retry that incident's SMS.
 - Telegram uses the same warning policy as SMS. Telegram failures are logged and do not affect any other MICWatcher function.
