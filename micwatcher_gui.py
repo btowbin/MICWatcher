@@ -45,6 +45,7 @@ class OperatorSettings:
     sms_to_number: str
     microscope_name: str
     telegram_enabled: bool
+    preserve_top_level_non_images: bool = False
 
 
 def normalized_path(value: str) -> Path:
@@ -76,6 +77,7 @@ def validate_operator_settings(
     sms_to_number: str = "",
     microscope_name: str = "Microscope",
     telegram_enabled: bool = False,
+    preserve_top_level_non_images: bool = False,
 ) -> OperatorSettings:
     microscope_name = microscope_name.strip()
     if not microscope_name:
@@ -134,6 +136,7 @@ def validate_operator_settings(
         phone_number,
         microscope_name,
         telegram_enabled,
+        preserve_top_level_non_images,
     )
 
 
@@ -153,6 +156,9 @@ def apply_operator_settings(
     transfer["check_interval_seconds"] = settings.transfer_interval_seconds
     transfer["destination_folder"] = (
         str(settings.destination_folder) if settings.destination_folder is not None else ""
+    )
+    transfer["preserve_top_level_non_images"] = (
+        settings.preserve_top_level_non_images
     )
     transfer.setdefault("stable_for_seconds", 60)
     if transfer.get("max_files_per_check") == 10:
@@ -341,6 +347,9 @@ class MICWatcherApp:
         self.transfer_enabled = tk.BooleanVar(value=bool(transfer.get("enabled", False)))
         self.destination_folder = tk.StringVar(value="")
         self.transfer_minutes = tk.StringVar(value="30")
+        self.preserve_top_level_non_images = tk.BooleanVar(
+            value=bool(transfer.get("preserve_top_level_non_images", False))
+        )
         self.status = tk.StringVar(value="Stopped")
         self.status_detail = tk.StringVar(value="Configure the experiment, then click Start monitoring.")
         self.activity_detail = tk.StringVar(value="No checks performed in this session.")
@@ -464,6 +473,19 @@ class MICWatcherApp:
         self.transfer_unit.grid(row=9, column=1, sticky="w", padx=(90, 0))
         self.form_widgets.append(self.transfer_entry)
 
+        self.transfer_mode_check = ttk.Checkbutton(
+            form,
+            text=(
+                "Mirror complete folder tree; overwrite destination; keep top-level "
+                "non-image files"
+            ),
+            variable=self.preserve_top_level_non_images,
+        )
+        self.transfer_mode_check.grid(
+            row=10, column=0, columnspan=3, sticky="w", pady=(4, 8)
+        )
+        self.form_widgets.append(self.transfer_mode_check)
+
         status_frame = ttk.LabelFrame(outer, text="Status", padding=12)
         status_frame.grid(row=3, column=0, sticky="nsew", pady=(14, 0))
         outer.rowconfigure(3, weight=1)
@@ -513,6 +535,7 @@ class MICWatcherApp:
         self.destination_button.configure(state=state)
         self.transfer_entry.configure(state=state)
         self.transfer_unit.configure(state=state)
+        self.transfer_mode_check.configure(state=state)
 
     def update_sms_controls(self) -> None:
         enabled = self.sms_enabled.get() and self.worker is None
@@ -543,6 +566,7 @@ class MICWatcherApp:
                 self.sms_to_number.get(),
                 self.microscope_name.get(),
                 self.telegram_enabled.get(),
+                self.preserve_top_level_non_images.get(),
             )
         except (OSError, ValueError) as exc:
             messagebox.showerror("Cannot start MICWatcher", str(exc), parent=self.root)
