@@ -38,11 +38,10 @@ Configure:
 - `transfer.destination_folder`: the mounted network-drive destination for this microscope.
 - `transfer.check_interval_seconds`: how often transfer candidates are checked, independently of acquisition alarms.
 - `transfer.stable_for_seconds`: how long a file must remain unchanged before copying.
-- `transfer.preserve_top_level_non_images`: enables folder-mirroring mode. The complete
-  folder tree is created at the destination, existing destination files are replaced,
-  files in subfolders are removed after verified copying, and files directly in the
-  acquisition folder are removed only when they are images. Top-level CSV and other
-  non-image files are copied but retained.
+- `transfer.preserve_top_level_non_images`: keeps CSV and other non-image files located
+  directly in the acquisition folder after copying. Existing destination files are
+  replaced, while verified copies of top-level images and files in subfolders are
+  removed from the source.
 - `transfer.max_files_per_check`: optional per-check limit; `null` means no limit.
 - `transfer.max_untransferred_files`: backlog safety limit; the default is 10,000.
 - `sms.account_sid`, `sms.auth_token`, and `sms.from_number`: administrator-supplied Twilio credentials and sender number. Leave `sms.enabled` false until these are configured.
@@ -91,13 +90,13 @@ Files already present when MICWatcher starts are included, as are files created 
 
 If a file already exists at the destination, MICWatcher keeps the local source, records its relative path, and continues copying the other eligible files. It sends at most one destination-conflict email per monitoring run, even if further conflicting files are discovered during later checks. Active conflicts and their file names still appear in the GUI and daily report. After a destination conflict is resolved, MICWatcher retries the retained local file on a later check.
 
-When **Mirror complete folder tree; overwrite destination; keep top-level non-image
-files** is selected, MICWatcher also creates empty destination folders and atomically
+When **Keep top-level non-image files after copying** is selected, MICWatcher atomically
 replaces files that already exist at the same relative path. All copied files below the
 top folder are deleted after verification. Direct children of the selected folder are
 deleted only for recognized image formats (including TIFF, JPEG, PNG, BMP, GIF, WebP,
 OME-TIFF, LSM, and ND2); top-level CSV and other non-image files remain and are recopied
-only after they change during the same monitoring run.
+only after they change during the same monitoring run. Empty source folders are not
+created at the destination.
 
 If another copying or local deletion error occurs, the source is retained and one warning email is sent. Repeated failures remain silent. A single recovery email is sent after a later file transfers successfully. The daily report includes transfer status, pending count, total transferred count, last success, destination conflicts, and any active error.
 

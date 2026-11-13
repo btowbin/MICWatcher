@@ -618,21 +618,6 @@ class Watcher:
                 LOG.warning("Could not remove partial transfer file %s", partial)
             raise
 
-    def _copy_empty_directories(self) -> None:
-        if not self.config.transfer.preserve_top_level_non_images:
-            return
-        destination_root = self.config.transfer.destination_folder
-        if destination_root is None:
-            raise RuntimeError("Transfer destination is not configured")
-        destination_root.mkdir(parents=True, exist_ok=True)
-        for root, directory_names, _ in os.walk(self.config.watch_folder):
-            root_path = Path(root)
-            for directory_name in directory_names:
-                relative = (root_path / directory_name).relative_to(
-                    self.config.watch_folder
-                )
-                (destination_root / relative).mkdir(parents=True, exist_ok=True)
-
     def _record_transfer_failure(
         self, observed_at: datetime, record: FileRecord, error: Exception
     ) -> None:
@@ -664,8 +649,6 @@ class Watcher:
     def _process_transfers(self, snapshot: FolderSnapshot, observed_at: datetime) -> int:
         if not self.config.transfer.enabled:
             return 0
-
-        self._copy_empty_directories()
 
         old_pending = self.state.get("transfer_pending", {})
         if not isinstance(old_pending, dict):

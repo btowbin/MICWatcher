@@ -74,7 +74,7 @@ The GUI contains:
 8. **Transfer stable files to a network folder** — enable this checkbox when required.
 9. **Transfer destination** — type, paste, or browse to the mounted folder. There is no default.
 10. **Transfer check** — default: **30 minutes**.
-11. **Mirror complete folder tree; overwrite destination; keep top-level non-image files** - use this when top-level CSV or other control files must remain locally. The mode recreates all subfolders, replaces older destination copies, deletes verified image copies from the top folder, and deletes all verified file copies from subfolders.
+11. **Keep top-level non-image files after copying** - use this when top-level CSV or other control files must remain locally. Existing destination files at the same relative path are replaced; verified image copies from the top folder and all verified file copies from subfolders are deleted locally.
 
 Review the settings, then click **Start monitoring**.
 
@@ -89,7 +89,7 @@ MICWatcher refuses to start if the local acquisition folder is blank or does not
 - A local file is deleted only after its network copy is completed and size-verified.
 - The first two missing-file checks send warning emails. Further warnings remain silent until a recovery email reports that files are appearing again.
 - If a file already exists at the destination, it remains in the local folder and the other files continue copying. MICWatcher sends only one destination-conflict email during that monitoring run, even if later checks find more conflicts. The current conflicting file names appear in the status panel and daily report.
-- In folder-mirroring mode, existing destination files are replaced atomically. Top-level non-image files remain locally and are not recopied again during the same run unless they change.
+- With top-level non-image protection enabled, existing destination files are replaced atomically. Top-level non-image files remain locally and are not recopied again during the same run unless they change. Empty source folders are not copied.
 - Another transfer failure sends one warning; a later successful transfer sends a recovery email.
 - When SMS is enabled, only the first missing-file warning and first transfer-failure warning for an incident also send an SMS. The second email, recovery emails, daily reports, and safety-stop email do not send SMS.
 - If SMS delivery fails, MICWatcher records the error in its log and continues monitoring, transferring, and sending email normally. It does not repeatedly retry that incident's SMS.

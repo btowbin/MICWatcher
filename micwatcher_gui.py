@@ -475,10 +475,7 @@ class MICWatcherApp:
 
         self.transfer_mode_check = ttk.Checkbutton(
             form,
-            text=(
-                "Mirror complete folder tree; overwrite destination; keep top-level "
-                "non-image files"
-            ),
+            text="Keep top-level non-image files after copying",
             variable=self.preserve_top_level_non_images,
         )
         self.transfer_mode_check.grid(

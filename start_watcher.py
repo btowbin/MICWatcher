@@ -155,7 +155,7 @@ def configure() -> bool:
             transfer_interval,
         )
         preserve_top_level_non_images = prompt_yes_no(
-            "Mirror folders, overwrite destination files, and keep top-level non-images",
+            "Keep top-level non-image files after copying",
             bool(transfer.get("preserve_top_level_non_images", False)),
         )
 

@@ -108,7 +108,7 @@ class WatcherTests(unittest.TestCase):
             ),
         )
 
-    def enable_folder_mirroring(self, destination=None):
+    def enable_top_level_non_image_protection(self, destination=None):
         self.config = replace(
             self.config,
             transfer=TransferConfig(
@@ -275,8 +275,8 @@ class WatcherTests(unittest.TestCase):
             b"existing-image", (self.destination / "already-present.tif").read_bytes()
         )
 
-    def test_folder_mirroring_applies_top_level_deletion_policy(self):
-        self.enable_folder_mirroring()
+    def test_top_level_non_image_protection_applies_deletion_policy(self):
+        self.enable_top_level_non_image_protection()
         top_image = self.folder / "overview.OME.TIFF"
         top_csv = self.folder / "positions.csv"
         nested_image = self.folder / "experiment" / "image.jpg"
@@ -308,10 +308,10 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(
             b"nested-csv", (self.destination / "experiment" / "metadata.csv").read_bytes()
         )
-        self.assertTrue((self.destination / "empty" / "nested").is_dir())
+        self.assertFalse((self.destination / "empty").exists())
 
-    def test_folder_mirroring_overwrites_only_after_source_changes(self):
-        self.enable_folder_mirroring()
+    def test_protected_top_level_file_overwrites_only_after_source_changes(self):
+        self.enable_top_level_non_image_protection()
         source = self.folder / "positions.csv"
         source.write_bytes(b"new-data")
         self.destination.mkdir()
