@@ -69,6 +69,7 @@ The GUI contains:
 3. **Send one SMS for each new warning** — optional; SMS has a small per-message cost.
 4. **SMS recipient number** — when SMS is enabled, enter the phone number in international format, for example `+41791234567`.
 5. **Send warnings to the configured Telegram channel** — optional; the administrator must configure the bot and channel first.
+   **Email me when the autofocus drift alert log reports a focus drift** — optional; watches `strong_AF_drift_alert_log.txt` in the local acquisition folder (not its subfolders) and emails each new drift alert once. If the file does not appear, one notice email is sent.
 6. **Local acquisition folder** — type, paste, or browse to the experiment folder.
 7. **Missing-file check** — default: **60 minutes**.
 8. **Transfer stable files to a network folder** — enable this checkbox when required.
